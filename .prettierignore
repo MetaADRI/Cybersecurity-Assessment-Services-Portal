@@ -1,0 +1,9 @@
+dist
+dist-server
+node_modules
+coverage
+test-results
+playwright-report
+data
+package-lock.json
+.tmp-test
