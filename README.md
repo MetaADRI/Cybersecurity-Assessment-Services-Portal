@@ -131,7 +131,7 @@ The API and frontend are deployed separately. Both talk to the same Neon Postgre
 
 1. **Neon** — create a project and database. Copy the pooled connection string (`postgresql://…?sslmode=require`). Create a second, empty database for tests if you plan to run the suite against Postgres.
 2. **Render** — create a new **Blueprint** from `render.yaml`, or a Web Service with build command `npm install && npm run build` and start command `npm start`. Set `DATABASE_URL` to the Neon connection string and `CORS_ORIGINS` to the Cloudflare Pages origin (e.g. `https://your-site.pages.dev`). Migrations and default configuration run automatically on startup.
-3. **Cloudflare Pages** — connect the GitHub repository, set the build command to `npm run build:client`, the output directory to `dist/client`, and add build variable `VITE_API_URL` set to the Render service URL (no trailing slash). `client/public/_redirects` provides SPA route fallback.
+3. **Cloudflare Pages/Workers** — connect the GitHub repository, set the build command to `npm run build:client`, the output directory to `dist/client`, and add build variable `VITE_API_URL` set to the Render service URL (no trailing slash). `wrangler.jsonc` provides SPA route fallback for Workers deployments; standard Pages deployments can add a `/* /index.html 200` `_redirects` rule if needed.
 4. Bootstrap the first administrator by running `npm run db:bootstrap` locally with `DATABASE_URL` pointing at the same Neon database, supplying `ODCMP_ADMIN_EMAIL` and `ODCMP_ADMIN_PASSWORD` in the environment.
 
 Cookies use `SameSite=None; Secure` in production so browser sessions work across the Cloudflare Pages and Render origins. Keep `SESSION_SECRET` stable across deploys; changing it invalidates all sessions.
