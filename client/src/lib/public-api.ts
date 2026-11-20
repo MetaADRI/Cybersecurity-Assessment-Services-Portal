@@ -60,7 +60,7 @@ async function request<T>(
   const contentType = res.headers.get('content-type') ?? '';
   const isJson = contentType.includes('application/json');
   const payload = isJson ? await res.json().catch(() => null) : await res.text();
-  if (!API_BASE_URL && contentType.includes('text/html') && prefix === '/public') {
+  if (!API_BASE_URL && prefix === '/public' && !isJson) {
     throw new PublicApiError(
       503,
       'The API address is not configured for this deployment. Set VITE_API_URL to the API service URL and rebuild the frontend.',
