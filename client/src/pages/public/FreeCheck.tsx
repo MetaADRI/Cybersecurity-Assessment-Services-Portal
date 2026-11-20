@@ -10,6 +10,7 @@ import {
   Loader2,
   Mail,
   Network,
+  ShieldAlert,
   ShieldCheck,
 } from 'lucide-react';
 import {
@@ -20,11 +21,12 @@ import {
   type FreeServiceKey,
 } from '../../../../shared/free-services';
 import { formatPublicError, publicApi, PublicApiError } from '../../lib/public-api';
-import { Input } from '../../components/ui';
+import { Input, Textarea } from '../../components/ui';
 
 const ICONS: Record<FreeServiceKey, typeof Globe> = {
   website_check: Globe,
   email_check: Mail,
+  email_phishing_check: ShieldAlert,
   hygiene_assessment: ClipboardCheck,
   phishing_quiz: Fish,
   subnet_calculator: Network,
@@ -93,12 +95,16 @@ export default function FreeCheck() {
   if (!valid || !copy) return <Navigate to="/services" replace />;
 
   const needsTarget =
-    key === 'website_check' || key === 'email_check' || key === 'subnet_calculator';
+    key === 'website_check' ||
+    key === 'email_check' ||
+    key === 'email_phishing_check' ||
+    key === 'subnet_calculator';
+  const needsTextarea = key === 'email_phishing_check';
   const needsConsent = key === 'website_check' || key === 'email_check';
   const quizDone = key !== 'phishing_quiz' || answeredCount === PHISHING_SCENARIOS.length;
   const hygieneDone = key !== 'hygiene_assessment' || answeredCount === HYGIENE_QUESTIONS.length;
   const canSubmit = needsTarget
-    ? target.trim().length > 2 && (!needsConsent || consent)
+    ? target.trim().length >= (needsTextarea ? 40 : 3) && (!needsConsent || consent)
     : quizDone && hygieneDone;
 
   const submit = async (event: FormEvent) => {
@@ -169,26 +175,41 @@ export default function FreeCheck() {
                   >
                     {copy.targetLabel}
                   </label>
-                  <Input
-                    id="target"
-                    value={target}
-                    onChange={(event) => setTarget(event.target.value)}
-                    placeholder={
-                      key === 'website_check'
-                        ? 'https://yourbusiness.co.zm'
-                        : key === 'subnet_calculator'
-                          ? '192.168.10.42/24'
-                          : 'yourbusiness.co.zm'
-                    }
-                    autoComplete={key === 'subnet_calculator' ? 'off' : 'url'}
-                    inputMode={key === 'subnet_calculator' ? 'text' : 'url'}
-                  />
+                  {needsTextarea ? (
+                    <Textarea
+                      id="target"
+                      value={target}
+                      onChange={(event) => setTarget(event.target.value)}
+                      rows={12}
+                      maxLength={20000}
+                      placeholder={
+                        'Delivered-To: you@example.com\nReceived: from mail.example.com ...\nFrom: "Accounts Team" <accounts@lookalike.co>\nSubject: Urgent: verify your account\n\nPaste the full message here...'
+                      }
+                    />
+                  ) : (
+                    <Input
+                      id="target"
+                      value={target}
+                      onChange={(event) => setTarget(event.target.value)}
+                      placeholder={
+                        key === 'website_check'
+                          ? 'https://yourbusiness.co.zm'
+                          : key === 'subnet_calculator'
+                            ? '192.168.10.42/24'
+                            : 'yourbusiness.co.zm'
+                      }
+                      autoComplete={key === 'subnet_calculator' ? 'off' : 'url'}
+                      inputMode={key === 'subnet_calculator' ? 'text' : 'url'}
+                    />
+                  )}
                   <p className="mt-1.5 text-xs text-slate-500">
                     {key === 'website_check'
                       ? 'We make one passive request to the public homepage. We do not attempt to break in.'
                       : key === 'subnet_calculator'
                         ? 'We calculate the network breakdown. No packets are sent and the address is not scanned.'
-                        : 'We read public DNS records. No email is sent and no mailbox is accessed.'}
+                        : needsTextarea
+                          ? 'No links are opened and no attachments are downloaded. Only a redacted summary is stored.'
+                          : 'We read public DNS records. No email is sent and no mailbox is accessed.'}
                   </p>
                 </div>
                 {needsConsent && copy.consent && (
@@ -395,7 +416,9 @@ export default function FreeCheck() {
               <p className="mt-3 text-right text-xs text-slate-500">
                 {needsConsent
                   ? 'Enter a target and confirm authorisation to continue.'
-                  : 'Enter a network or IP address to continue.'}
+                  : needsTextarea
+                    ? 'Paste at least 40 characters of email text or headers.'
+                    : 'Enter a network or IP address to continue.'}
               </p>
             )}
           </form>

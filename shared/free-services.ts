@@ -9,6 +9,7 @@
 export const FREE_SERVICE_KEYS = [
   'website_check',
   'email_check',
+  'email_phishing_check',
   'hygiene_assessment',
   'phishing_quiz',
   'subnet_calculator',
@@ -53,6 +54,17 @@ export const SERVICE_CATALOG: ServiceCatalogItem[] = [
     icon: 'mail',
   },
   {
+    key: 'email_phishing_check',
+    name: 'Suspicious Email Analyzer',
+    tagline: 'Read a suspicious message without clicking anything.',
+    description:
+      'Paste email text or headers for a local, rule-based review of sender clues, authentication results, urgent language and risky links. Nothing is sent or fetched.',
+    category: 'Free checks',
+    isFree: true,
+    sortOrder: 3,
+    icon: 'shield-alert',
+  },
+  {
     key: 'hygiene_assessment',
     name: 'Security Hygiene Assessment',
     tagline: 'Twelve plain questions. One honest picture of the basics.',
@@ -60,7 +72,7 @@ export const SERVICE_CATALOG: ServiceCatalogItem[] = [
       'A quick self-assessment covering passwords, updates, backups, access, devices and incident readiness.',
     category: 'Free checks',
     isFree: true,
-    sortOrder: 3,
+    sortOrder: 4,
     icon: 'clipboard-check',
   },
   {
@@ -71,7 +83,7 @@ export const SERVICE_CATALOG: ServiceCatalogItem[] = [
       'Eight realistic email, SMS, WhatsApp and mobile-money scenarios with an explanation after every answer.',
     category: 'Free checks',
     isFree: true,
-    sortOrder: 4,
+    sortOrder: 5,
     icon: 'fish',
   },
   {
@@ -82,7 +94,7 @@ export const SERVICE_CATALOG: ServiceCatalogItem[] = [
       'Calculates the network, broadcast, usable host range, netmask and address scope for an IPv4 prefix.',
     category: 'Free checks',
     isFree: true,
-    sortOrder: 5,
+    sortOrder: 6,
     icon: 'network',
   },
   {
@@ -257,6 +269,11 @@ export const FREE_SERVICE_COPY: Record<
     targetLabel: 'Email domain',
     consent: 'I own this domain or am authorised to test it.',
   },
+  email_phishing_check: {
+    name: 'Suspicious Email Analyzer',
+    short: 'Paste a suspicious email and see the signals a careful reader would look for.',
+    targetLabel: 'Email text or headers',
+  },
   hygiene_assessment: {
     name: 'Security Hygiene Assessment',
     short: 'Answer twelve questions about the security basics in your organisation.',
@@ -389,6 +406,27 @@ export interface EmailMeta {
   };
 }
 
+export interface EmailPhishingLinkMeta {
+  host: string;
+  reason: string;
+}
+
+export interface EmailPhishingMeta {
+  senderDomain: string | null;
+  replyToDomain: string | null;
+  subject: string | null;
+  auth: {
+    spf: string | null;
+    dkim: string | null;
+    dmarc: string | null;
+  };
+  signals: string[];
+  links: EmailPhishingLinkMeta[];
+  linkCount: number;
+  bodyChars: number;
+  checksRun: number;
+}
+
 export interface HygieneCategoryMeta {
   key: string;
   label: string;
@@ -452,6 +490,7 @@ export interface FreeResultMeta {
   personal?: PersonalInfo;
   website?: WebsiteMeta;
   email?: EmailMeta;
+  emailPhishing?: EmailPhishingMeta;
   hygiene?: HygieneMeta;
   phishing?: PhishingMeta;
   subnet?: SubnetMeta;
@@ -976,6 +1015,156 @@ export const EMAIL_FINDING_COPY: Record<string, FindingCopy> = {
     consequence: 'A downgrade or delivery problem may remain invisible until users report it.',
     recommendation: 'Publish a TLS-RPT record when your mail provider supports it.',
     serviceKey: 'email_check',
+  },
+};
+
+export const EMAIL_PHISHING_FINDING_COPY: Record<string, FindingCopy> = {
+  'emailphish.sender_mismatch': {
+    severity: 'medium',
+    title: 'The sender name does not match the sender domain',
+    meaning:
+      'The display name looks like a trusted person or brand, but the actual sending domain is different.',
+    consequence:
+      'A busy reader may trust the name shown in their inbox and miss the different address behind it.',
+    recommendation:
+      'Check the full sender address, not only the name, and verify unexpected requests through a known contact route.',
+    serviceKey: 'email_phishing_check',
+  },
+  'emailphish.reply_to_mismatch': {
+    severity: 'medium',
+    title: 'Replies go to a different domain',
+    meaning: 'The Reply-To address uses a different domain from the visible sender.',
+    consequence:
+      'A reply can leave your organisation and reach an attacker even when the sender looks familiar.',
+    recommendation:
+      'Do not reply to payment or login requests. Open the known website or contact the person separately.',
+    serviceKey: 'email_phishing_check',
+  },
+  'emailphish.spf_fail': {
+    severity: 'high',
+    title: 'SPF authentication failed',
+    meaning: 'The receiving server recorded a failed SPF result for the sending domain.',
+    consequence: 'The message was not authorised by the domain it claims to come from.',
+    recommendation: 'Treat the message as suspicious and report it through your normal reporting route.',
+    serviceKey: 'email_phishing_check',
+  },
+  'emailphish.dkim_fail': {
+    severity: 'high',
+    title: 'DKIM authentication failed',
+    meaning: 'The receiving server recorded a failed DKIM signature check.',
+    consequence: 'The message content or headers may have been altered, or the signature is invalid.',
+    recommendation: 'Do not trust the message until the sender is verified independently.',
+    serviceKey: 'email_phishing_check',
+  },
+  'emailphish.dmarc_fail': {
+    severity: 'high',
+    title: 'DMARC authentication failed',
+    meaning: 'The receiving server recorded that the message did not align with the domain policy.',
+    consequence: 'The domain owner has told receivers that this message should not be trusted.',
+    recommendation: 'Report the message and avoid links, attachments and payment instructions inside it.',
+    serviceKey: 'email_phishing_check',
+  },
+  'emailphish.auth_missing': {
+    severity: 'low',
+    title: 'Authentication results were not included',
+    meaning: 'The pasted text did not include SPF, DKIM or DMARC results from a receiving server.',
+    consequence: 'This check cannot confirm whether the message passed email authentication.',
+    recommendation:
+      'If this is important, forward the message as an attachment from your mail client to preserve full headers.',
+    serviceKey: 'email_phishing_check',
+  },
+  'emailphish.credential_request': {
+    severity: 'high',
+    title: 'The message asks for credentials or one-time codes',
+    meaning: 'The wording asks the reader to confirm a password, PIN, recovery phrase or one-time code.',
+    consequence: 'This is a common goal of phishing: capture enough information to enter an account.',
+    recommendation:
+      'Never send passwords or one-time codes in reply to a message. Go directly to the service instead.',
+    serviceKey: 'email_phishing_check',
+  },
+  'emailphish.payment_request': {
+    severity: 'high',
+    title: 'The message pushes an urgent payment change',
+    meaning: 'The wording combines payment, invoice or banking language with urgency or secrecy.',
+    consequence: 'Business email compromise often uses a fake invoice or changed bank details.',
+    recommendation:
+      'Verify payment changes by phone using a known number, not a number in the message.',
+    serviceKey: 'email_phishing_check',
+  },
+  'emailphish.urgent_language': {
+    severity: 'medium',
+    title: 'The message uses pressure or urgency',
+    meaning: 'Words such as “urgent”, “act now” or “final notice” are used to rush a decision.',
+    consequence: 'Pressure reduces the chance that a reader will slow down and verify the request.',
+    recommendation: 'Pause, check the sender and confirm through an independent channel before acting.',
+    serviceKey: 'email_phishing_check',
+  },
+  'emailphish.generic_greeting': {
+    severity: 'low',
+    title: 'The greeting is vague',
+    meaning: 'The message uses a generic greeting rather than a name or account-specific detail.',
+    consequence: 'Mass phishing messages often cannot address the recipient personally.',
+    recommendation: 'Treat vague greetings as a cue to check the rest of the message carefully.',
+    serviceKey: 'email_phishing_check',
+  },
+  'emailphish.shortened_links': {
+    severity: 'medium',
+    title: 'The message contains shortened links',
+    meaning: 'A link uses a shortening service that hides the final destination.',
+    consequence: 'A hidden destination can lead to a fake login page or malware download.',
+    recommendation:
+      'Do not click. Hover or copy the link into a safe URL checker, and use the known website instead.',
+    serviceKey: 'email_phishing_check',
+  },
+  'emailphish.ip_links': {
+    severity: 'medium',
+    title: 'A link points directly to an IP address',
+    meaning: 'One or more links use a raw IP address instead of a normal domain name.',
+    consequence: 'Legitimate brands rarely link to bare IP addresses, especially for login pages.',
+    recommendation: 'Avoid the link and verify the service through its official address.',
+    serviceKey: 'email_phishing_check',
+  },
+  'emailphish.punycode_links': {
+    severity: 'medium',
+    title: 'A link uses encoded or unusual characters',
+    meaning: 'One or more link hosts contain punycode or mixed-script characters.',
+    consequence: 'Lookalike domains can be designed to resemble a trusted brand.',
+    recommendation: 'Do not click. Type the expected domain yourself and compare carefully.',
+    serviceKey: 'email_phishing_check',
+  },
+  'emailphish.many_links': {
+    severity: 'low',
+    title: 'The message contains several links',
+    meaning: 'Multiple links were found in a short message.',
+    consequence: 'Extra links give an attacker more chances to hide the destination behind readable text.',
+    recommendation: 'Check every link before clicking, or use the known website directly.',
+    serviceKey: 'email_phishing_check',
+  },
+  'emailphish.attachment_keyword': {
+    severity: 'low',
+    title: 'The message references an unexpected attachment or document',
+    meaning: 'Words such as “invoice”, “statement” or “shared document” appear in the message.',
+    consequence: 'Unexpected documents can be used to deliver malware or collect credentials.',
+    recommendation: 'Confirm the document with the sender before opening it or enabling content.',
+    serviceKey: 'email_phishing_check',
+  },
+  'emailphish.limited_content': {
+    severity: 'info',
+    title: 'Only a short message was provided',
+    meaning: 'There was not enough text or header detail for a broad review.',
+    consequence: 'Some clues may not be visible in this result.',
+    recommendation:
+      'Paste the full message text and, when available, the full email headers for a more complete review.',
+    serviceKey: 'email_phishing_check',
+  },
+  'emailphish.no_obvious_signals': {
+    severity: 'info',
+    title: 'No obvious phishing signals were detected',
+    meaning: 'The available text did not trigger the rules used by this free check.',
+    consequence: 'A clean result does not prove the message is safe; clever phishing can still pass simple rules.',
+    recommendation:
+      'Keep verifying unexpected requests through a known channel and report anything that feels wrong.',
+    serviceKey: 'email_phishing_check',
   },
 };
 
@@ -1533,6 +1722,31 @@ export const WELCOME_COPY: Record<FreeServiceKey, WelcomeStepCopy> = {
     ],
     expectedDuration: 'About one to two minutes.',
   },
+  email_phishing_check: {
+    headline: 'Read the message before you react to it.',
+    intro:
+      'Paste the email text, with full headers if you have them. We read it locally and point out the same clues a careful person would look for: sender details, authentication results, pressure, credential requests and risky links. Nothing is clicked, fetched or sent.',
+    steps: [
+      {
+        title: 'Identity',
+        body: 'Display name, sender domain and Reply-To address for mismatches.',
+      },
+      {
+        title: 'Authentication',
+        body: 'SPF, DKIM and DMARC results when the receiving server included them.',
+      },
+      {
+        title: 'Behaviour',
+        body: 'Urgency, payment or credential requests, generic greetings and hidden link hosts.',
+      },
+    ],
+    notTouched: [
+      'No links in the message are opened or visited.',
+      'No attachments are downloaded or scanned.',
+      'Only a redacted summary is stored with the result.',
+    ],
+    expectedDuration: 'Instant.',
+  },
   hygiene_assessment: {
     headline: 'Let us get a clear picture of your basics.',
     intro:
@@ -1633,6 +1847,10 @@ export const SERVICE_SPECIFIC_BULLETS: Record<string, string[]> = {
     'Reads SPF, DKIM and DMARC records and shows exactly what is missing, so you know who can send as you.',
     'Grades your impersonation defences and maps a safe rollout plan from monitoring to blocking.',
   ],
+  email_phishing_check: [
+    'Reviews pasted email text and headers for sender mismatches, authentication failures, urgent language and risky links.',
+    'Explains each signal in plain language and gives a safe verification step without clicking anything.',
+  ],
   hygiene_assessment: [
     'Turns honest answers about passwords, backups, updates and readiness into category scores and top priorities.',
     'Maps every priority to a friendly next step, from quick wins this week to a 30-day plan.',
@@ -1652,6 +1870,8 @@ export const SERVICE_FREE_WORDING: Record<string, string> = {
     'One free website security check. One try per visitor. No account needed to see the result.',
   email_check:
     'One free email trust check. One try per visitor. No account needed to see the result.',
+  email_phishing_check:
+    'One free suspicious email review. One try per visitor. No account needed to see the result.',
   hygiene_assessment:
     'One free security hygiene assessment. One try per visitor. No account needed to see the result.',
   phishing_quiz:
@@ -1663,6 +1883,7 @@ export const SERVICE_FREE_WORDING: Record<string, string> = {
 export const SERVICE_CTA_HEADING: Record<string, string> = {
   website_check: 'See what an attacker can learn about you',
   email_check: 'Close the door attackers are already trying to open',
+  email_phishing_check: 'Check the message before it checks you',
   hygiene_assessment: 'Know your real level, kindly',
   phishing_quiz: 'Would your team spot this before it costs you?',
   subnet_calculator: 'Plan your address space without the spreadsheet maths',
@@ -1694,6 +1915,11 @@ export const PAID_SERVICE_HANDOFF: Record<
     serviceKey: 'cloud_security',
     serviceName: 'Cloud Security',
     context: 'Email impersonation defences for the domain, including SPF, DKIM and DMARC rollout.',
+  },
+  email_phishing_check: {
+    serviceKey: 'security_training',
+    serviceName: 'Security Training',
+    context: 'Suspicious email signals and the reporting habits that help staff act safely.',
   },
   hygiene_assessment: {
     serviceKey: 'security_training',
@@ -1752,6 +1978,82 @@ export function findingPenalty(severity: FreeSeverity): number {
   if (severity === 'medium') return 10;
   if (severity === 'low') return 4;
   return 0;
+}
+
+export interface ScoreDeduction {
+  id: string;
+  label: string;
+  detail: string;
+  points: number;
+}
+
+export interface ScoreExplanation {
+  method: string;
+  formula: string;
+  deductions: ScoreDeduction[];
+  note: string;
+}
+
+export function explainScore(result: FreeResult): ScoreExplanation | null {
+  if (result.serviceKey === 'subnet_calculator') return null;
+
+  if (result.serviceKey === 'hygiene_assessment') {
+    const answers = result.meta?.answers ?? {};
+    const values: Record<string, number> = { yes: 1, partly: 0.5, no: 0 };
+    const deductions = HYGIENE_QUESTIONS.filter((question) => {
+      const answer = answers[question.id];
+      return answer !== undefined && values[answer] !== 1;
+    }).map((question) => {
+      const answer = answers[question.id];
+      const missed = 1 - (values[answer] ?? 0);
+      return {
+        id: question.id,
+        label: question.finding.title,
+        detail: `You answered ${answers[question.id]}.`,
+        points: Math.round(question.weight * missed * 10) / 10,
+      };
+    });
+    return {
+      method: 'Weighted answers',
+      formula: 'Each question has a weight; “Yes” earns full marks and “Partly” earns half.',
+      deductions,
+      note: `Total possible weight is ${HYGIENE_QUESTIONS.reduce((sum, q) => sum + q.weight, 0)} points. The final score is the rounded percentage you earned.`,
+    };
+  }
+
+  if (result.serviceKey === 'phishing_quiz') {
+    const answers = result.meta?.answers ?? {};
+    const pointsPerScenario = 100 / PHISHING_SCENARIOS.length;
+    const deductions = PHISHING_SCENARIOS.filter((scenario) => {
+      const index = Number(answers[scenario.id]);
+      return !Number.isInteger(index) || !scenario.options[index]?.correct;
+    }).map((scenario) => ({
+      id: scenario.id,
+      label: `Missed: ${scenario.subject}`,
+      detail: scenario.lesson,
+      points: Math.round(pointsPerScenario * 10) / 10,
+    }));
+    return {
+      method: 'Scenario accuracy',
+      formula: 'Every scenario has equal weight. The score is correct answers divided by total scenarios.',
+      deductions,
+      note: `Each scenario is worth ${Math.round(pointsPerScenario * 10) / 10} percentage points.`,
+    };
+  }
+
+  return {
+    method: 'Severity deductions',
+    formula: 'Start at 100 points, subtract each issue by severity, then floor the result at 0.',
+    deductions: result.findings
+      .filter((finding) => findingPenalty(finding.severity) > 0)
+      .map((finding) => ({
+        id: finding.id,
+        label: finding.title,
+        detail: `${severityLabel(finding.severity)} finding`,
+        points: findingPenalty(finding.severity),
+      })),
+    note: 'High removes 22 points, medium 10, low 4 and information-only findings do not change the score.',
+  };
 }
 
 export function resultSummary(score: number, findings: FreeFinding[]): string {

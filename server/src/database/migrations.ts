@@ -364,6 +364,28 @@ export const migrations: Migration[] = [
         WHERE client_id IS NOT NULL AND status IN ('new','contacted','in_progress');
     `,
   },
+  {
+    version: 3,
+    name: 'email_phishing_free_check',
+    sql: `
+      INSERT INTO service_catalog
+        (key, name, tagline, description, category, is_free, sort_order, icon)
+      VALUES
+        ('email_phishing_check', 'Suspicious Email Analyzer', 'Read a suspicious message without clicking anything.', 'Paste email text or headers for a local, rule-based review of sender clues, authentication results, urgent language and risky links. Nothing is sent or fetched.', 'Free checks', 1, 3, 'shield-alert')
+      ON CONFLICT (key) DO UPDATE SET
+        name = excluded.name,
+        tagline = excluded.tagline,
+        description = excluded.description,
+        category = excluded.category,
+        is_free = excluded.is_free,
+        sort_order = excluded.sort_order,
+        icon = excluded.icon;
+
+      UPDATE service_catalog SET sort_order = 4 WHERE key = 'hygiene_assessment';
+      UPDATE service_catalog SET sort_order = 5 WHERE key = 'phishing_quiz';
+      UPDATE service_catalog SET sort_order = 6 WHERE key = 'subnet_calculator';
+    `,
+  },
 ];
 
 export async function runMigrations(db: Db): Promise<{ applied: number[] }> {

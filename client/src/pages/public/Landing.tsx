@@ -10,6 +10,7 @@ import {
   Mail,
   Network,
   ScanSearch,
+  ShieldAlert,
   ShieldCheck,
   Sparkles,
 } from 'lucide-react';
@@ -24,6 +25,7 @@ import { Reveal } from '../../components/Reveal';
 const FREE_ICONS: Record<FreeServiceKey, typeof Globe> = {
   website_check: Globe,
   email_check: Mail,
+  email_phishing_check: ShieldAlert,
   hygiene_assessment: ClipboardCheck,
   phishing_quiz: Fish,
   subnet_calculator: Network,
@@ -32,6 +34,7 @@ const FREE_ICONS: Record<FreeServiceKey, typeof Globe> = {
 const FREE_ORDER: FreeServiceKey[] = [
   'website_check',
   'email_check',
+  'email_phishing_check',
   'hygiene_assessment',
   'phishing_quiz',
   'subnet_calculator',

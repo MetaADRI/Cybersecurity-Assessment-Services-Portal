@@ -11,7 +11,7 @@ const code = z
 export const publicFreeRunSchema = z
   .object({
     serviceKey: z.enum(FREE_SERVICE_KEYS),
-    target: z.string().trim().max(2048).optional(),
+    target: z.string().trim().max(20_000).optional(),
     consentConfirmed: z.boolean().default(false),
     fingerprintHash: z
       .string()
@@ -30,6 +30,15 @@ export const publicFreeRunSchema = z
           code: 'custom',
           path: ['consentConfirmed'],
           message: 'Confirm that you own the target or are authorised to test it',
+        });
+      }
+    }
+    if (value.serviceKey === 'email_phishing_check') {
+      if (!value.target || value.target.length < 40) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['target'],
+          message: 'Paste the full suspicious email text or headers to analyse',
         });
       }
     }

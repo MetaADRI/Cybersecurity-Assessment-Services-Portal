@@ -186,6 +186,31 @@ describe('public free-service safeguards', () => {
     });
     expect(res.body.run.result.findings[0].id).toBe('subnet.calculated');
   });
+
+  it('reviews pasted suspicious email without requiring consent', async () => {
+    const agent = request.agent(app);
+    const catalog = await agent.get('/api/v1/public/catalog');
+    expect(
+      catalog.body.items.some((item: { key: string }) => item.key === 'email_phishing_check'),
+    ).toBe(true);
+
+    const res = await agent.post('/api/v1/public/free-runs').send({
+      serviceKey: 'email_phishing_check',
+      target: `Authentication-Results: mx.example.com; spf=fail; dkim=fail; dmarc=fail
+From: "PayPal Security" <security@random-mail.test>
+Reply-To: billing@different-domain.test
+Subject: Urgent: verify your account
+Dear User, send your password and one-time code now: https://bit.ly/verify-now
+`,
+    });
+    expect(res.status).toBe(201);
+    expect(res.body.run.status).toBe('completed');
+    expect(res.body.run.result.serviceKey).toBe('email_phishing_check');
+    expect(res.body.run.result.findings.map((item: { id: string }) => item.id)).toContain(
+      'emailphish.credential_request',
+    );
+    expect(JSON.stringify(res.body.run.result)).not.toContain('one-time code now');
+  });
 });
 
 describe('client portal isolation and session expiry', () => {

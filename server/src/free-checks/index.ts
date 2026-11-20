@@ -2,6 +2,7 @@ import type { FreeResult, FreeServiceKey } from '../../../shared/free-services';
 import type { PublicFreeRunInput } from '../../../shared/client-schemas';
 import { runWebsiteCheck } from './website';
 import { runEmailCheck } from './email';
+import { runEmailPhishingCheck } from './email-phishing';
 import { runHygieneAssessment } from './hygiene';
 import { runPhishingQuiz } from './phishing';
 import { runSubnetCalculator } from './subnet';
@@ -21,6 +22,8 @@ export function runFreeCheck(
         target: input.target ?? '',
         consentConfirmed: input.consentConfirmed,
       });
+    case 'email_phishing_check':
+      return runEmailPhishingCheck({ target: input.target ?? '' });
     case 'hygiene_assessment':
       return runHygieneAssessment({ answers: input.answers });
     case 'phishing_quiz':

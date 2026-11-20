@@ -1,5 +1,5 @@
 /** Fetch wrappers for the public and client-portal APIs (separate from staff auth). */
-import { apiUrl } from './config';
+import { API_BASE_URL, apiUrl } from './config';
 
 export class PublicApiError extends Error {
   constructor(
@@ -60,6 +60,13 @@ async function request<T>(
   const contentType = res.headers.get('content-type') ?? '';
   const isJson = contentType.includes('application/json');
   const payload = isJson ? await res.json().catch(() => null) : await res.text();
+  if (!API_BASE_URL && contentType.includes('text/html') && prefix === '/public') {
+    throw new PublicApiError(
+      503,
+      'The API address is not configured for this deployment. Set VITE_API_URL to the API service URL and rebuild the frontend.',
+      'api_not_configured',
+    );
+  }
   if (!res.ok) {
     const error = (payload as { error?: { message?: string; code?: string; details?: unknown } })
       ?.error;
@@ -84,6 +91,10 @@ export function clientApi<T>(path: string, options: RequestOptions = {}): Promis
 }
 
 export function formatPublicError(err: unknown): string {
-  if (err instanceof PublicApiError || err instanceof Error) return err.message;
+  if (err instanceof PublicApiError) return err.message;
+  if (err instanceof TypeError) {
+    return 'The API could not be reached. Check the API service and CORS settings, then try again.';
+  }
+  if (err instanceof Error) return err.message;
   return 'Something went wrong. Please try again.';
 }

@@ -12,10 +12,14 @@ import {
 import {
   FREE_SERVICE_COPY,
   SERVICE_CATALOG,
+  explainScore,
+  findingPenalty,
   severityLabel,
   type FreeSeverity,
   type FreeFinding,
+  type ScoreExplanation,
   type SubnetMeta,
+  type WebsiteMeta,
 } from '../../../../shared/free-services';
 import type { FreeRunSummary } from '../../../../shared/client-types';
 import { formatPublicError, publicApi } from '../../lib/public-api';
@@ -38,6 +42,17 @@ const SEVERITY_DOT: Record<FreeSeverity, string> = {
 };
 
 const ORDER: FreeSeverity[] = ['high', 'medium', 'low', 'info'];
+
+const HEADER_LABELS: Record<string, string> = {
+  'strict-transport-security': 'HSTS',
+  'content-security-policy': 'Content Security Policy',
+  'x-frame-options': 'Clickjacking protection',
+  'x-content-type-options': 'MIME sniffing protection',
+  'referrer-policy': 'Referrer policy',
+  'permissions-policy': 'Permissions policy',
+};
+
+const SCORE_HEADERS = Object.keys(HEADER_LABELS);
 
 function scoreTone(score: number): { ring: string; text: string } {
   if (score >= 80) return { ring: 'var(--chart-primary)', text: 'text-blue-600' };
@@ -81,6 +96,11 @@ export default function Result() {
       3,
     );
   }, [findings]);
+
+  const scoreExplanation = useMemo(
+    () => (run?.result ? explainScore(run.result) : null),
+    [run],
+  );
 
   const generateReport = async () => {
     if (!id) return;
@@ -207,7 +227,7 @@ export default function Result() {
                 }}
               >
                 <div className="flex h-32 w-32 flex-col items-center justify-center rounded-full bg-white">
-                  <span className={`text-4xl font-semibold ${tone.text}`}>{result.score}</span>
+                  <span className={`text-4xl font-semibold ${tone.text}`}>{result.score}%</span>
                   <span className="text-xs uppercase tracking-wider text-slate-500">
                     Grade {result.grade}
                   </span>
@@ -234,6 +254,9 @@ export default function Result() {
                   <p className="text-[10px] uppercase tracking-wider text-slate-500">Low / info</p>
                 </div>
               </div>
+              {scoreExplanation && (
+                <ScoreMath explanation={scoreExplanation} score={result.score} />
+              )}
             </div>
           )}
 
@@ -276,6 +299,10 @@ export default function Result() {
           </div>
         </div>
 
+        {!subnet && result.meta?.website && (
+          <HeaderChecks website={result.meta.website} />
+        )}
+
         {!subnet && (
           <div className="mt-8">
             <h2 className="text-xl font-semibold text-slate-900">What we found</h2>
@@ -286,7 +313,15 @@ export default function Result() {
             </p>
             <div className="mt-4 space-y-3">
               {findings.map((finding) => (
-                <FindingCard key={finding.id} finding={finding} />
+                <FindingCard
+                  key={finding.id}
+                  finding={finding}
+                  showPenalty={
+                    result.serviceKey === 'website_check' ||
+                    result.serviceKey === 'email_check' ||
+                    result.serviceKey === 'email_phishing_check'
+                  }
+                />
               ))}
             </div>
           </div>
@@ -365,7 +400,105 @@ function SubnetBreakdown({ subnet, summary }: { subnet: SubnetMeta; summary: str
   );
 }
 
-function FindingCard({ finding }: { finding: FreeFinding }) {
+function ScoreMath({
+  explanation,
+  score,
+}: {
+  explanation: ScoreExplanation;
+  score: number;
+}) {
+  const totalDeducted = explanation.deductions.reduce((sum, row) => sum + row.points, 0);
+  return (
+    <div className="mt-5 border-t border-slate-100 pt-4 text-left">
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+          How this score is built
+        </p>
+        <span className="text-xs font-semibold text-blue-700">{score}% final</span>
+      </div>
+      <p className="mt-2 text-xs font-medium text-slate-700">{explanation.method}</p>
+      <p className="mt-1 text-xs leading-5 text-slate-500">{explanation.formula}</p>
+      <div className="mt-3 rounded-lg border border-slate-100 bg-slate-50 p-3">
+        {explanation.deductions.length === 0 ? (
+          <p className="text-xs text-slate-600">No score deductions were applied.</p>
+        ) : (
+          <ul className="space-y-2">
+            {explanation.deductions.map((deduction) => (
+              <li key={deduction.id} className="flex items-start justify-between gap-3 text-xs">
+                <span>
+                  <span className="block font-medium text-slate-700">{deduction.label}</span>
+                  <span className="block text-slate-500">{deduction.detail}</span>
+                </span>
+                <span className="shrink-0 font-semibold text-red-700">
+                  −{deduction.points} pts
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+        <div className="mt-3 flex items-center justify-between border-t border-slate-200 pt-2 text-xs font-semibold text-slate-700">
+          <span>Total deducted</span>
+          <span>{Math.round(totalDeducted * 10) / 10} pts</span>
+        </div>
+      </div>
+      <p className="mt-2 text-[11px] leading-5 text-slate-500">{explanation.note}</p>
+    </div>
+  );
+}
+
+function HeaderChecks({ website }: { website: WebsiteMeta }) {
+  const details = SCORE_HEADERS.map((name) => ({
+    name,
+    label: HEADER_LABELS[name],
+    meta: website.headers.find((item) => item.name === name),
+  })).filter((item) => item.meta);
+  if (details.length === 0) return null;
+
+  return (
+    <div className="mt-8 rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-blue-600">
+            Browser protections
+          </p>
+          <h2 className="mt-1 text-lg font-semibold text-slate-900">
+            Security header scorecard
+          </h2>
+        </div>
+        <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">
+          Header grade {website.headerGrade}
+        </span>
+      </div>
+      <div className="mt-4 grid gap-2 sm:grid-cols-2">
+        {details.map((item) => (
+          <div
+            key={item.name}
+            className="flex items-center justify-between gap-3 rounded-lg border border-slate-100 bg-slate-50 px-3 py-2"
+          >
+            <span className="text-xs font-medium text-slate-700">{item.label}</span>
+            <span
+              className={`text-[11px] font-semibold ${item.meta?.present ? 'text-emerald-700' : 'text-red-700'}`}
+            >
+              {item.meta?.present ? 'Present' : 'Missing'}
+            </span>
+          </div>
+        ))}
+      </div>
+      <p className="mt-3 text-xs leading-5 text-slate-500">
+        These are the six browser headers checked in this pass. The main score also includes HTTPS,
+        TLS, cookies, redirects, mixed content and public technology clues.
+      </p>
+    </div>
+  );
+}
+
+function FindingCard({
+  finding,
+  showPenalty = false,
+}: {
+  finding: FreeFinding;
+  showPenalty?: boolean;
+}) {
   return (
     <article className={`rounded-lg border p-4 ${SEVERITY_STYLE[finding.severity]}`}>
       <div className="flex flex-wrap items-start justify-between gap-2">
@@ -378,8 +511,17 @@ function FindingCard({ finding }: { finding: FreeFinding }) {
             {finding.detail && <p className="mt-1 text-xs opacity-80">{finding.detail}</p>}
           </div>
         </div>
-        <span className="rounded-full bg-white/70 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider">
-          {severityLabel(finding.severity)}
+        <span className="flex items-center gap-1.5">
+          {showPenalty && (
+            <span className="rounded-full bg-white/70 px-2 py-0.5 text-[10px] font-semibold text-slate-700">
+              {findingPenalty(finding.severity) > 0
+                ? `−${findingPenalty(finding.severity)} pts`
+                : 'No score change'}
+            </span>
+          )}
+          <span className="rounded-full bg-white/70 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider">
+            {severityLabel(finding.severity)}
+          </span>
         </span>
       </div>
       <div className="mt-3 grid gap-3 text-sm sm:grid-cols-3">
