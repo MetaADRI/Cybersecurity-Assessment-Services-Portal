@@ -22,3 +22,13 @@ services:
         value: Africa/Lusaka
       - key: LOG_LEVEL
         value: info
+      - key: FREE_CHECKS_UNLIMITED
+        value: 'false'
+      - key: FREE_CHECKS_PER_VISITOR_PER_DAY
+        value: '5'
+      - key: FREE_CHECKS_PER_IP_PER_DAY
+        value: '20'
+      - key: FREE_CHECKS_PER_TARGET_PER_HOUR
+        value: '3'
+      - key: CLIENT_FREE_CHECKS_PER_DAY
+        value: '20'

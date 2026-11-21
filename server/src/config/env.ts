@@ -39,15 +39,18 @@ const envSchema = z.object({
   RATE_LIMIT_WINDOW_MS: z.coerce.number().int().min(1000).default(60000),
   RATE_LIMIT_AUTH_MAX: z.coerce.number().int().min(1).default(20),
   /**
-   * Temporary switch used while validating the free checks. When true, one
-   * visitor may run the same or several free services more than once. Restore
-   * the original one-service-per-visitor rule by setting this to false (or
-   * removing the variable) and restarting the server.
+   * Escape hatch for local testing. When true, the per-visitor, per-IP and
+   * per-target free-check limits are skipped; the 10 requests/minute/IP limiter
+   * still applies.
    */
   FREE_CHECKS_UNLIMITED: z
     .string()
     .optional()
     .transform((value) => value === 'true' || value === '1'),
+  FREE_CHECKS_PER_VISITOR_PER_DAY: z.coerce.number().int().min(1).default(5),
+  FREE_CHECKS_PER_IP_PER_DAY: z.coerce.number().int().min(1).default(20),
+  FREE_CHECKS_PER_TARGET_PER_HOUR: z.coerce.number().int().min(1).default(3),
+  CLIENT_FREE_CHECKS_PER_DAY: z.coerce.number().int().min(1).default(20),
   LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
 });
 

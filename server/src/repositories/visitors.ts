@@ -18,15 +18,15 @@ export interface ReserveInput {
   ipHash: string;
   fingerprintHash?: string | null;
   email?: string | null;
-  serviceKey: string;
-  /** Temporary testing mode: record the run without enforcing the one-per-visitor rule. */
-  allowRepeat?: boolean;
+  clientId?: string | null;
+  /** Kept for call-site compatibility; the free-check gate is now rate-limit based. */
+  serviceKey?: string;
 }
 
 export interface ReserveResult {
   visitor: VisitorRow;
-  blocked: boolean;
-  usedService: string | null;
+  blocked: false;
+  usedService: null;
 }
 
 export async function getVisitorByCookie(db: Db, cookieId: string): Promise<VisitorRow | null> {
@@ -45,6 +45,7 @@ async function touchVisitor(
   ipHash: string,
   fingerprintHash: string | null,
   email: string | null,
+  clientId: string | null,
 ): Promise<VisitorRow> {
   const existing = await getVisitorByCookie(db, cookieId);
   if (!existing) {
@@ -52,75 +53,40 @@ async function touchVisitor(
     await db
       .prepare(
         `INSERT INTO visitors (id, cookie_id, ip_hash, fingerprint_hash, email, client_id, free_service_used, free_used_at, created_at)
-         VALUES (?, ?, ?, ?, ?, NULL, NULL, NULL, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, ?)`,
       )
-      .run(id, cookieId, ipHash, fingerprintHash, email, nowIso());
+      .run(id, cookieId, ipHash, fingerprintHash, email, clientId, nowIso());
     return (await getVisitorById(db, id))!;
   }
   await db
     .prepare(
       `UPDATE visitors
-       SET ip_hash = ?, fingerprint_hash = COALESCE(?, fingerprint_hash), email = COALESCE(?, email)
+       SET ip_hash = ?, fingerprint_hash = COALESCE(?, fingerprint_hash),
+           email = COALESCE(?, email), client_id = COALESCE(?, client_id)
        WHERE id = ?`,
     )
-    .run(ipHash, fingerprintHash, email, existing.id);
+    .run(ipHash, fingerprintHash, email, clientId, existing.id);
   return (await getVisitorById(db, existing.id))!;
 }
 
 /**
- * Reserve a free run before any network work starts. The transaction is
- * immediate so two parallel requests cannot both pass the eligibility check.
+ * Create or update the anonymous visitor record before any network work starts.
+ * The transaction is immediate so parallel requests cannot create duplicate
+ * identity rows. Eligibility is handled by the rate-limit repository instead.
  */
 export async function reserveFreeService(db: Db, input: ReserveInput): Promise<ReserveResult> {
-  const tx = db.transaction(async (): Promise<ReserveResult> => {
-    const visitor = await touchVisitor(
+  const tx = db.transaction(async (): Promise<ReserveResult> => ({
+    visitor: await touchVisitor(
       db,
       input.cookieId,
       input.ipHash,
       input.fingerprintHash ?? null,
       input.email?.trim().toLowerCase() || null,
-    );
-
-    if (!input.allowRepeat) {
-      if (visitor.free_service_used) {
-        return { visitor, blocked: true, usedService: visitor.free_service_used };
-      }
-
-      const fingerprintMatch = input.fingerprintHash
-        ? await db
-            .prepare(
-              `SELECT free_service_used FROM visitors
-               WHERE fingerprint_hash = ? AND free_service_used IS NOT NULL
-               LIMIT 1`,
-            )
-            .get<{ free_service_used: string }>(input.fingerprintHash)
-        : undefined;
-
-      const emailMatch = visitor.email
-        ? await db
-            .prepare(
-              `SELECT free_service_used FROM visitors
-               WHERE lower(email) = lower(?) AND free_service_used IS NOT NULL
-               LIMIT 1`,
-            )
-            .get<{ free_service_used: string }>(visitor.email)
-        : undefined;
-
-      const match = fingerprintMatch ?? emailMatch;
-      if (match) {
-        return { visitor, blocked: true, usedService: match.free_service_used };
-      }
-    }
-
-    await db
-      .prepare('UPDATE visitors SET free_service_used = ?, free_used_at = ? WHERE id = ?')
-      .run(input.serviceKey, nowIso(), visitor.id);
-    return {
-      visitor: (await getVisitorById(db, visitor.id))!,
-      blocked: false,
-      usedService: null,
-    };
-  });
+      input.clientId ?? null,
+    ),
+    blocked: false,
+    usedService: null,
+  }));
   return await tx();
 }
 

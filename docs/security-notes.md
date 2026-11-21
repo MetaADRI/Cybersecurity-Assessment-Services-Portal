@@ -42,7 +42,7 @@ Scope: a **local MVP** for demonstration and controlled internal evaluation. It 
 
 - Structured logs with a configurable level; **passwords, session tokens and secrets are never logged**, and audit summaries contain only identifiers and non-sensitive descriptions.
 - Audit events cover login/logout, customer create/archive, assessment create/complete, scoring-config changes, finding create/update, severity/priority/assignment/due-date/status changes, risk acceptance, resolution/verification, report generation, and user/role changes.
-- Audit records are append-only through the API — ordinary users have no endpoint that writes or mutates them. **They are not tamper-proof**: anyone with filesystem access to the SQLite file can modify them.
+- Audit records are append-only through the API — ordinary users have no endpoint that writes or mutates them. **They are not tamper-proof**: anyone with direct database access or a database backup can modify them.
 
 ### Configuration
 
@@ -58,7 +58,7 @@ Scope: a **local MVP** for demonstration and controlled internal evaluation. It 
 4. **Sessions are file/database-backed on one node**; no revocation of all sessions on password change beyond the current logic, no idle-timeout UI warning.
 5. **HTTPS is not terminated by the app** — run it behind a TLS-terminating reverse proxy; `Secure` cookies only take effect over HTTPS.
 6. **No CSP nonces/hashes for the SPA** — the default Helmet CSP may need tuning; report PDFs are served with `Content-Disposition: attachment`.
-7. **Backup/restore and encryption at rest are not implemented** — the SQLite file is plain text on disk; protect the host and back up manually.
+7. **Backup/restore and encryption at rest are not implemented** — the app does not add its own encryption at rest; protect the database and back up manually.
 8. **No data-retention policy** for report files or audit events.
 9. **Dependency and vulnerability scanning** is not automated in CI.
 10. **No automated security tests** beyond the authorization/CSRF/path-traversal integration tests; no penetration test has been performed.

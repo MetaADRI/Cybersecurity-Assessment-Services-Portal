@@ -14,6 +14,11 @@ import {
   getFreeRunForVisitor,
 } from '../repositories/free-runs';
 import { getVisitorByCookie, getVisitorById, reserveFreeService } from '../repositories/visitors';
+import {
+  checkFreeCheckLimits,
+  isUnreachableFreeResult,
+  normalizeLimitTarget,
+} from '../repositories/free-limits';
 import { getReportForVisitor } from '../repositories/client-reports';
 import { recordAudit } from '../repositories/audit';
 import { runFreeCheck } from '../free-checks';
@@ -57,32 +62,54 @@ export function publicRouter(): Router {
       const fingerprintHash = body.fingerprintHash
         ? hashFingerprint(body.fingerprintHash, req.env.SESSION_SECRET)
         : null;
+      const ipHash = hashIp(req.ip || req.socket.remoteAddress || 'unknown', req.env.SESSION_SECRET);
+      const clientId = req.clientUser?.id ?? null;
       const reservation = await reserveFreeService(req.db, {
         cookieId,
-        ipHash: hashIp(req.ip || req.socket.remoteAddress || 'unknown', req.env.SESSION_SECRET),
+        ipHash,
         fingerprintHash,
+        clientId,
         serviceKey: body.serviceKey,
-        allowRepeat: req.env.FREE_CHECKS_UNLIMITED,
       });
-      if (reservation.blocked) {
-        throw new AppError(
-          409,
-          `You have already used your free check (${reservation.usedService?.replace(/_/g, ' ')}). Create an account to request a deeper review.`,
-          'free_service_used',
-          { usedService: reservation.usedService },
-        );
+
+      if (!req.env.FREE_CHECKS_UNLIMITED) {
+        const limit = await checkFreeCheckLimits(req.db, {
+          visitorId: reservation.visitor.id,
+          cookieId,
+          ipHash,
+          fingerprintHash,
+          clientId,
+          serviceKey: body.serviceKey,
+          target: body.target,
+          perVisitorPerDay: req.env.FREE_CHECKS_PER_VISITOR_PER_DAY,
+          perIpPerDay: req.env.FREE_CHECKS_PER_IP_PER_DAY,
+          perTargetPerHour: req.env.FREE_CHECKS_PER_TARGET_PER_HOUR,
+          clientPerDay: req.env.CLIENT_FREE_CHECKS_PER_DAY,
+        });
+        if (limit) {
+          throw new AppError(429, limit.message, 'free_check_limit_reached', {
+            limit: limit.limit,
+            label: limit.label,
+            used: limit.used,
+            max: limit.max,
+            windowMs: limit.windowMs,
+            resetAt: limit.resetAt,
+            retryAfterSeconds: limit.retryAfterSeconds,
+          });
+        }
       }
 
       const runId = await createFreeRun(req.db, {
         visitorId: reservation.visitor.id,
         serviceKey: body.serviceKey,
-        target: body.target ?? null,
+        target: normalizeLimitTarget(body.serviceKey, body.target) ?? body.target ?? null,
         consentConfirmed: body.consentConfirmed,
       });
 
       try {
         const result = await runFreeCheck(body.serviceKey, body);
-        await completeFreeRun(req.db, runId, result);
+        const unreachable = isUnreachableFreeResult(result);
+        await completeFreeRun(req.db, runId, result, unreachable ? 'failed' : 'completed');
         const visitor = await getVisitorById(req.db, reservation.visitor.id);
         try {
           await generateFreeReport(req.db, req.env, {

@@ -386,6 +386,16 @@ export const migrations: Migration[] = [
       UPDATE service_catalog SET sort_order = 6 WHERE key = 'subnet_calculator';
     `,
   },
+  {
+    version: 4,
+    name: 'free_check_rate_limit_indexes',
+    sql: `
+      CREATE INDEX IF NOT EXISTS idx_free_runs_status_created
+        ON free_service_runs(status, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_free_runs_target_created
+        ON free_service_runs(target, created_at DESC);
+    `,
+  },
 ];
 
 export async function runMigrations(db: Db): Promise<{ applied: number[] }> {

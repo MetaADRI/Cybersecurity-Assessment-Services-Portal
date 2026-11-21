@@ -38,6 +38,12 @@ const ANSWER_LABELS = [
   { value: 'no', label: 'No' },
 ];
 
+interface RateLimitInfo {
+  limit: string;
+  resetAt: string;
+  retryAfterSeconds: number;
+}
+
 async function fingerprint(): Promise<string | undefined> {
   try {
     const raw = [
@@ -70,7 +76,7 @@ export default function FreeCheck() {
   const [fingerprintHash, setFingerprintHash] = useState<string | undefined>();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [usedService, setUsedService] = useState<string | null>(null);
+  const [rateLimit, setRateLimit] = useState<RateLimitInfo | null>(null);
 
   useEffect(() => {
     void fingerprint().then(setFingerprintHash);
@@ -112,7 +118,7 @@ export default function FreeCheck() {
     if (!canSubmit || loading) return;
     setLoading(true);
     setError(null);
-    setUsedService(null);
+    setRateLimit(null);
     try {
       const response = await publicApi<{ run: { id: string } }>('/free-runs', {
         method: 'POST',
@@ -126,9 +132,15 @@ export default function FreeCheck() {
       });
       navigate(`/results/${response.run.id}`);
     } catch (err) {
-      if (err instanceof PublicApiError && err.status === 409) {
-        const details = err.details as { usedService?: string } | undefined;
-        setUsedService(details?.usedService ?? null);
+      if (err instanceof PublicApiError && err.status === 429) {
+        const details = err.details as
+          | { limit?: string; resetAt?: string; retryAfterSeconds?: number }
+          | undefined;
+        setRateLimit({
+          limit: details?.limit ?? 'request',
+          resetAt: details?.resetAt ?? '',
+          retryAfterSeconds: details?.retryAfterSeconds ?? 60,
+        });
       }
       setError(formatPublicError(err));
     } finally {
@@ -138,6 +150,10 @@ export default function FreeCheck() {
 
   const scenario = PHISHING_SCENARIOS[currentScenario];
   const scenarioAnswer = scenario ? answers[scenario.id] : undefined;
+  const resetTime =
+    rateLimit?.resetAt && !Number.isNaN(Date.parse(rateLimit.resetAt))
+      ? new Date(rateLimit.resetAt).toLocaleString()
+      : null;
 
   return (
     <div className="bg-slate-50">
@@ -367,19 +383,28 @@ export default function FreeCheck() {
             {error && (
               <div className="mt-5 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
                 <p className="font-medium">{error}</p>
-                {usedService && (
-                  <p className="mt-1 text-xs">
-                    Your free check was used for {usedService.replace(/_/g, ' ')}. A free account
-                    lets you keep the result and ask for a deeper review.
-                  </p>
-                )}
-                {usedService && (
-                  <Link
-                    to="/client/signup"
-                    className="mt-2 inline-flex items-center gap-1 font-medium underline"
-                  >
-                    Create a free account <ArrowRight className="h-3.5 w-3.5" />
-                  </Link>
+                {rateLimit && (
+                  <>
+                    <p className="mt-1 text-xs">
+                      {rateLimit.limit === 'target'
+                        ? 'This target has reached its hourly check limit.'
+                        : rateLimit.limit === 'ip'
+                          ? 'This IP address has reached its daily check limit.'
+                          : 'This visitor has reached the daily check limit.'}{' '}
+                      {resetTime
+                        ? `You can try again at ${resetTime}.`
+                        : `Try again in about ${rateLimit.retryAfterSeconds} seconds.`}
+                    </p>
+                    <p className="mt-1 text-xs">
+                      Create a free account for a higher daily limit and to keep your results.
+                    </p>
+                    <Link
+                      to="/client/signup"
+                      className="mt-2 inline-flex items-center gap-1 font-medium underline"
+                    >
+                      Create a free account <ArrowRight className="h-3.5 w-3.5" />
+                    </Link>
+                  </>
                 )}
               </div>
             )}
@@ -426,7 +451,7 @@ export default function FreeCheck() {
 
         <p className="mt-5 flex items-center justify-center gap-1.5 text-xs text-slate-500">
           <CheckCircle2 className="h-3.5 w-3.5" />
-          Free while we test the service. No account required to see the result.
+          Free checks without an account. Daily limits apply.
         </p>
       </div>
     </div>

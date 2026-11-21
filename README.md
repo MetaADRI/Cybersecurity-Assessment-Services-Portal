@@ -6,7 +6,7 @@ An integrated, database-backed web application for **OpenDefenders Technologies*
 2. **Vulnerability Remediation Tracking System** — record findings, prioritise them with a documented decision matrix, run a governed remediation lifecycle, and import/export findings via CSV.
 3. **Cybersecurity Report Generation System** — generate executive, technical and remediation **PDF reports** from real stored application data.
 
-All three modules share one SQLite database: the same customers, assessments, findings, scores, snapshots and audit history flow through the whole product. There is **no AI and no paid service** anywhere in the scoring, prioritisation, recommendation or reporting pipeline — every calculation is deterministic code with automated tests.
+All three modules share one Postgres database (Neon in deployment): the same customers, assessments, findings, scores, snapshots and audit history flow through the whole product. There is **no AI and no paid service** anywhere in the scoring, prioritisation, recommendation or reporting pipeline — every calculation is deterministic code with automated tests.
 
 > **MVP status.** This release is intended for local demonstration and controlled internal evaluation. It is _not_ approved for production use or for storing real client data as-is — see [`docs/security-notes.md`](docs/security-notes.md).
 
@@ -46,7 +46,7 @@ Then edit `.env` and set at minimum a strong `SESSION_SECRET`:
 node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 ```
 
-`.env.example` documents every variable. `.env`, the SQLite database files and generated reports are git-ignored — never commit them.
+`.env.example` documents every variable. `.env`, local database files and generated reports are git-ignored — never commit them.
 
 ## Environment configuration
 

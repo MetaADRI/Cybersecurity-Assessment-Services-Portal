@@ -21,7 +21,7 @@ Pure logic with no database or DOM:
 
 ## 2. Backend integration tests (`tests/integration/api.test.ts`)
 
-Supertest requests against the real Express app and a temporary SQLite database, organised by the project's acceptance workflows:
+Supertest requests against the real Express app and an isolated Postgres schema, organised by the project's acceptance workflows:
 
 - **Authentication/authorization** — unauthenticated access rejected, generic login errors, session + CSRF token issuance, missing CSRF token rejected, reviewer blocked from every write, analyst blocked from user management and scoring config.
 - **Workflow A** — customer creation, validation, duplicate prevention, unknown ids.

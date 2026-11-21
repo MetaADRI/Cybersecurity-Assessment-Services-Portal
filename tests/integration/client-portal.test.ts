@@ -7,6 +7,7 @@ import { createApp } from '../../server/src/app';
 import { HYGIENE_QUESTIONS } from '../../shared/free-services';
 import { CLIENT_SESSION_MINUTES } from '../../server/src/repositories/clients';
 import { isBlockedAddress } from '../../server/src/free-checks/website';
+import { newId, nowIso } from '../../server/src/utils/time';
 import type { Env } from '../../server/src/config/env';
 import type { Db } from '../../server/src/database/db';
 import type { Express } from 'express';
@@ -24,6 +25,10 @@ const env: Env = {
   RATE_LIMIT_WINDOW_MS: 60000,
   RATE_LIMIT_AUTH_MAX: 1000,
   FREE_CHECKS_UNLIMITED: false,
+  FREE_CHECKS_PER_VISITOR_PER_DAY: 5,
+  FREE_CHECKS_PER_IP_PER_DAY: 1000,
+  FREE_CHECKS_PER_TARGET_PER_HOUR: 3,
+  CLIENT_FREE_CHECKS_PER_DAY: 20,
   LOG_LEVEL: 'error',
 };
 
@@ -71,12 +76,35 @@ async function signupAndVerify(agent: Agent, email: string): Promise<Authenticat
   };
 }
 
-function clientPost(client: AuthenticatedClient, url: string, body: unknown) {
+function clientPost(
+  client: AuthenticatedClient,
+  url: string,
+  body: unknown,
+  ip = '198.51.100.40',
+) {
   return client.agent
     .post(url)
     .set('x-csrf-token', client.csrf)
     .set('Origin', 'http://localhost')
+    .set('X-Forwarded-For', ip)
     .send(body as object);
+}
+
+function publicPost(agent: Agent, ip: string, body: unknown) {
+  return agent
+    .post('/api/v1/public/free-runs')
+    .set('X-Forwarded-For', ip)
+    .send(body as object);
+}
+
+async function withLimits<T>(patch: Partial<Env>, fn: () => Promise<T>): Promise<T> {
+  const before = { ...env };
+  Object.assign(env, patch);
+  try {
+    return await fn();
+  } finally {
+    Object.assign(env, before);
+  }
 }
 
 beforeAll(async () => {
@@ -136,37 +164,146 @@ describe('public free-service safeguards', () => {
     expect(res.body.error.message).toMatch(/not a public internet host/i);
   });
 
-  it('allows exactly one free service per visitor, even with parallel requests', async () => {
+  it('allows multiple completed checks under the daily visitor limit', async () => {
     const agent = request.agent(app);
-    const catalog = await agent.get('/api/v1/public/catalog');
-    expect(catalog.status).toBe(200);
-    expect(
-      catalog.body.items.some((item: { key: string }) => item.key === 'hygiene_assessment'),
-    ).toBe(true);
-
     const payload = {
       serviceKey: 'hygiene_assessment',
       consentConfirmed: false,
       answers: hygieneAnswers,
     };
-    const results = await Promise.all([
-      agent.post('/api/v1/public/free-runs').send(payload),
-      agent.post('/api/v1/public/free-runs').send(payload),
-    ]);
-    const statuses = results.map((res) => res.status).sort();
-    expect(statuses).toEqual([201, 409]);
 
-    const rejected = results.find((res) => res.status === 409);
-    expect(rejected?.body.error.code).toBe('free_service_used');
-    expect(rejected?.body.error.details.usedService).toBe('hygiene_assessment');
+    await withLimits({ FREE_CHECKS_PER_VISITOR_PER_DAY: 5 }, async () => {
+      const first = await publicPost(agent, '198.51.100.10', payload);
+      const second = await publicPost(agent, '198.51.100.10', payload);
+      expect(first.status).toBe(201);
+      expect(second.status).toBe(201);
+      expect(second.body.run.status).toBe('completed');
+    });
+  });
 
-    const later = await agent.post('/api/v1/public/free-runs').send(payload);
-    expect(later.status).toBe(409);
+  it('returns 429 with retry information on the sixth completed check in 24 hours', async () => {
+    const agent = request.agent(app);
+    const payload = {
+      serviceKey: 'hygiene_assessment',
+      consentConfirmed: false,
+      answers: hygieneAnswers,
+    };
 
-    const completed = await db
-      .prepare("SELECT COUNT(*) AS count FROM free_service_runs WHERE status = 'completed'")
-      .get<{ count: string | number }>();
-    expect(Number(completed?.count ?? 0)).toBe(1);
+    await withLimits({ FREE_CHECKS_PER_VISITOR_PER_DAY: 5 }, async () => {
+      const responses = [];
+      for (let index = 0; index < 6; index += 1) {
+        responses.push(await publicPost(agent, '198.51.100.11', payload));
+      }
+
+      expect(responses.slice(0, 5).map((res) => res.status)).toEqual([201, 201, 201, 201, 201]);
+      const limited = responses[5];
+      expect(limited.status).toBe(429);
+      expect(limited.body.error.code).toBe('free_check_limit_reached');
+      expect(limited.body.error.details).toMatchObject({
+        limit: 'visitor',
+        used: 5,
+        max: 5,
+        windowMs: 86_400_000,
+      });
+      expect(limited.body.error.details.retryAfterSeconds).toBeGreaterThan(0);
+      expect(Number.isNaN(Date.parse(limited.body.error.details.resetAt))).toBe(false);
+    });
+  });
+
+  it('limits repeated checks against the same target per hour', async () => {
+    const agent = request.agent(app);
+    const payload = {
+      serviceKey: 'subnet_calculator',
+      target: '203.0.113.77/24',
+    };
+
+    await withLimits({ FREE_CHECKS_PER_TARGET_PER_HOUR: 1 }, async () => {
+      const first = await publicPost(agent, '198.51.100.12', payload);
+      const second = await publicPost(agent, '198.51.100.12', payload);
+      expect(first.status).toBe(201);
+      expect(second.status).toBe(429);
+      expect(second.body.error.code).toBe('free_check_limit_reached');
+      expect(second.body.error.details.limit).toBe('target');
+      expect(second.body.error.details.retryAfterSeconds).toBeGreaterThan(0);
+    });
+  });
+
+  it('gives signed-in clients the higher daily limit', async () => {
+    const client = await signupAndVerify(request.agent(app), 'limit-client@test.local');
+    const payload = {
+      serviceKey: 'hygiene_assessment',
+      consentConfirmed: false,
+      answers: hygieneAnswers,
+    };
+
+    await withLimits({ FREE_CHECKS_PER_VISITOR_PER_DAY: 1 }, async () => {
+      const first = await clientPost(
+        client,
+        '/api/v1/public/free-runs',
+        payload,
+        '198.51.100.13',
+      );
+      const second = await clientPost(
+        client,
+        '/api/v1/public/free-runs',
+        payload,
+        '198.51.100.13',
+      );
+      expect(first.status).toBe(201);
+      expect(second.status).toBe(201);
+    });
+  });
+
+  it('bypasses the daily limits but keeps the per-minute limiter when unlimited is enabled', async () => {
+    const agent = request.agent(app);
+    const payload = {
+      serviceKey: 'hygiene_assessment',
+      consentConfirmed: false,
+      answers: hygieneAnswers,
+    };
+
+    await withLimits(
+      { FREE_CHECKS_UNLIMITED: true, FREE_CHECKS_PER_VISITOR_PER_DAY: 1 },
+      async () => {
+        const first = await publicPost(agent, '198.51.100.14', payload);
+        const second = await publicPost(agent, '198.51.100.14', payload);
+        expect(first.status).toBe(201);
+        expect(second.status).toBe(201);
+      },
+    );
+  });
+
+  it('does not count failed or unreachable runs toward the daily limit', async () => {
+    const agent = request.agent(app);
+    const payload = {
+      serviceKey: 'hygiene_assessment',
+      consentConfirmed: false,
+      answers: hygieneAnswers,
+    };
+
+    await withLimits({ FREE_CHECKS_PER_VISITOR_PER_DAY: 2 }, async () => {
+      const first = await publicPost(agent, '198.51.100.15', payload);
+      expect(first.status).toBe(201);
+
+      const latest = await db
+        .prepare('SELECT visitor_id FROM free_service_runs ORDER BY created_at DESC LIMIT 1')
+        .get<{ visitor_id: string }>();
+      await db
+        .prepare(
+          `INSERT INTO free_service_runs
+             (id, visitor_id, service_key, target, consent_confirmed, status, score, results_json, created_at)
+           VALUES (?, ?, 'website_check', 'https://unreachable.test', 1, 'failed', 56, ?, ?)`,
+        )
+        .run(
+          newId(),
+          latest!.visitor_id,
+          JSON.stringify({ serviceKey: 'website_check', findings: [{ id: 'web.unreachable' }] }),
+          nowIso(),
+        );
+
+      const second = await publicPost(agent, '198.51.100.15', payload);
+      expect(second.status).toBe(201);
+    });
   });
 
   it('calculates a subnet tool result without requiring consent', async () => {

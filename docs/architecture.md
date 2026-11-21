@@ -1,6 +1,6 @@
 # Architecture
 
-ODCMP is a **modular monolith**: one Express process serving a versioned JSON API and the built React single-page application, backed by one SQLite database. There are no microservices, queues or external providers — every business calculation runs in-process and is deterministic.
+ODCMP is a **modular monolith**: one Express process serving a versioned JSON API and the built React single-page application, backed by one Postgres database (Neon in deployment). There are no microservices, queues or external providers — every business calculation runs in-process and is deterministic.
 
 ```
 client/            React SPA (Vite build -> dist/client)
@@ -40,7 +40,7 @@ docs/              This documentation set
 1. **Routes** validate (Zod), authorize (role middleware) and translate to status codes. They never write SQL.
 2. **Services** implement business workflows and transactions (e.g. freezing a score snapshot on completion, committing a CSV import atomically).
 3. **Repositories** own all SQL, always parameterized. No string concatenation of user input into queries anywhere.
-4. **Scoring** (`server/src/scoring/`) is pure: plain data in, `ScoreResult` out. It imports nothing from Express, SQLite or React, so it is exhaustively unit-testable and is also the _only_ place a health score is ever computed — the API, the dashboard and the PDF renderer all consume the same result object.
+4. **Scoring** (`server/src/scoring/`) is pure: plain data in, `ScoreResult` out. It imports nothing from Express, Postgres or React, so it is exhaustively unit-testable and is also the _only_ place a health score is ever computed — the API, the dashboard and the PDF renderer all consume the same result object.
 
 ## Data model
 

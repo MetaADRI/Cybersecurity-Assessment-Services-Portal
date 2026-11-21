@@ -64,14 +64,19 @@ export async function createFreeRun(
   return id;
 }
 
-export async function completeFreeRun(db: Db, id: string, result: FreeResult): Promise<void> {
+export async function completeFreeRun(
+  db: Db,
+  id: string,
+  result: FreeResult,
+  status: 'completed' | 'failed' = 'completed',
+): Promise<void> {
   await db
     .prepare(
       `UPDATE free_service_runs
-       SET status = 'completed', score = ?, results_json = ?
+       SET status = ?, score = ?, results_json = ?
        WHERE id = ?`,
     )
-    .run(result.score, JSON.stringify(result), id);
+    .run(status, result.score, JSON.stringify(result), id);
 }
 
 export async function failFreeRun(db: Db, id: string): Promise<void> {
